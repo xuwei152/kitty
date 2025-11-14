@@ -30,3 +30,5 @@ __pycache__/
 bypy/b
 bypy/virtual-machines.conf
 installation
+bak
+*.ico
