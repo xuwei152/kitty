@@ -29,5 +29,5 @@ else
 fi
 
 echo "Running build/install:"
-echo "env -u PYTHONMULTIPROCESSING_SPAWN python3 setup.py linux-package --prefix=./installation"
+echo "❯ env -u PYTHONMULTIPROCESSING_SPAWN python3 setup.py linux-package --prefix=./installation"
 env -u PYTHONMULTIPROCESSING_SPAWN python3 setup.py linux-package --prefix=./installation
