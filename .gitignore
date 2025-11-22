@@ -31,4 +31,5 @@ bypy/b
 bypy/virtual-machines.conf
 installation*
 bak
+installation*
 *.ico
