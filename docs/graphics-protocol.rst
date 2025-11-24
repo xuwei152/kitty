@@ -132,19 +132,30 @@ code to demonstrate its use
         }
 
 
-.. tab:: Bash
+.. tab:: POSIX sh
 
     .. code-block:: sh
 
-        #!/bin/bash
+        #!/bin/sh
 
-        # This uses the kitten standalone binary from kitty to get the pixel sizes
-        # since we can't do IOCTLs directly. Fortunately, kitten is a static exe
-        # pre-built for every Unix like OS under the sun.
+        read rows cols <<EOF
+        $(command stty size)
+        EOF
 
-        builtin read -r rows cols < <(command stty size)
-        IFS=x builtin read -r width height < <(command kitten icat --print-window-size); builtin unset IFS
-        builtin echo "number of rows: $rows number of columns: $cols screen width: $width screen height: $height"
+        oldstty=$(command stty -g)
+        command stty raw -echo
+        printf "\033[14t"
+        response=""
+        while : ; do
+            char=$(command dd bs=1 count=1 2>/dev/null)
+            [ "$char" = "t" ] && break
+            response="${response}${char}"
+        done
+        command stty "$oldstty"
+        h=$(echo "$response" | cut -d';' -f2)
+        w=$(echo "$response" | cut -d';' -f3)
+        printf "number of rows: %d number of columns: %d" "$rows" "$cols"
+        printf " screen width: %d screen height: %d\n" "$w" "$h"
 
 
 Note that some terminals return ``0`` for the width and height values. Such
@@ -165,28 +176,33 @@ A minimal example
 Some minimal code to display PNG images in kitty, using the most basic
 features of the graphics protocol:
 
-.. tab:: Bash
+.. tab:: POSIX sh
 
     .. code-block:: sh
 
-        #!/bin/bash
+        #!/bin/sh
+
         transmit_png() {
-            data=$(base64 "$1")
-            data="${data//[[:space:]]}"
-            builtin local pos=0
-            builtin local chunk_size=4096
-            while [ $pos -lt ${#data} ]; do
-                builtin printf "\e_G"
-                [ $pos = "0" ] && printf "a=T,f=100,"
-                builtin local chunk="${data:$pos:$chunk_size}"
-                pos=$(($pos+$chunk_size))
-                [ $pos -lt ${#data} ] && builtin printf "m=1"
-                [ ${#chunk} -gt 0 ] && builtin printf ";%s" "${chunk}"
-                builtin printf "\e\\"
+            if command base64 --help 2>&1 | grep -q -- '-w,'; then # Linux (GNU coreutils)
+                base64_flag="-w"
+            elif command base64 --help 2>&1 | grep -q -- '-b,'; then # macOS/BSD
+                base64_flag="-b"
+            else
+                echo "Unknown base64 command: cannot set line width" >&2
+                return 1
+            fi
+            first="y"
+            command base64 "$base64_flag" 4096 "$1" | while IFS= read -r chunk; do
+                printf "\033_G"
+                [ "$first" != "n" ] && printf "a=T,f=100,"
+                first="n"
+                printf "m=1;%s\033\\" "${chunk}"
             done
+            printf "\033_Gm=0;\033\\"
         }
 
         transmit_png "$1"
+
 
 .. tab:: Python
 
