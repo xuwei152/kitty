@@ -182,23 +182,23 @@ features of the graphics protocol:
 
         #!/bin/sh
 
-        transmit_png() {
-            if command base64 --help 2>&1 | grep -q -- '-w,'; then # Linux (GNU coreutils)
-                base64_flag="-w"
-            elif command base64 --help 2>&1 | grep -q -- '-b,'; then # macOS/BSD
-                base64_flag="-b"
-            else
-                echo "Unknown base64 command: cannot set line width" >&2
-                return 1
-            fi
+        send_chunked() {
             first="y"
-            command base64 "$base64_flag" 4096 "$1" | while IFS= read -r chunk; do
-                printf "\033_G"
-                [ "$first" != "n" ] && printf "a=T,f=100,"
-                first="n"
-                printf "m=1;%s\033\\" "${chunk}"
+            while IFS= read -r chunk; do
+                metadata=""; [ "$first" = "y" ] && { metadata="a=T,f=100,"; first="n"; }
+                printf "\033_G%sm=1;%s\033\\" "${metadata}" "${chunk}"
             done
-            printf "\033_Gm=0;\033\\"
+            [ "$first" = "n" ] && { printf "\033_Gm=0;\033\\"; return 0; }
+            return 1
+        }
+
+        transmit_png() {
+            # Different systems have different or missing base64 executables.
+            # The sed command below adds a trailing newline which openssl
+            # base64 does not produce and is needed for reading via read -r
+            { command base64 -w 4096 "$1" 2>/dev/null | send_chunked; } || \
+            { command base64 -b 4096 "$1" 2>/dev/null | send_chunked; } || \
+            { command openssl base64 -e -A -in "$1" | command sed '$a\' | command fold -b -w 4096 | send_chunked; }
         }
 
         transmit_png "$1"
@@ -208,34 +208,23 @@ features of the graphics protocol:
 
     .. code-block:: python
 
-        #!/usr/bin/python
+        #!/usr/bin/env python
         import sys
         from base64 import standard_b64encode
 
-        def serialize_gr_command(**cmd):
-            payload = cmd.pop('payload', None)
-            cmd = ','.join(f'{k}={v}' for k, v in cmd.items())
-            ans = []
-            w = ans.append
-            w(b'\033_G'), w(cmd.encode('ascii'))
-            if payload:
-                w(b';')
-                w(payload)
-            w(b'\033\\')
-            return b''.join(ans)
-
-        def write_chunked(**cmd):
-            data = standard_b64encode(cmd.pop('data'))
-            while data:
-                chunk, data = data[:4096], data[4096:]
-                m = 1 if data else 0
-                sys.stdout.buffer.write(serialize_gr_command(payload=chunk, m=m,
-                                                            **cmd))
-                sys.stdout.flush()
-                cmd.clear()
-
+        first, eof, buf = True, False, memoryview(bytearray(3 * 4096 // 4))
+        w = sys.stdout.buffer.write
         with open(sys.argv[-1], 'rb') as f:
-            write_chunked(a='T', f=100, data=f.read())
+            while not eof:
+                p = buf[:]
+                while p and not eof:
+                    n = f.readinto1(p)
+                    p, eof = p[n:], n == 0
+                encoded = standard_b64encode(buf[:len(buf)-len(p)])
+                metadata, first = "a=T,f=100," if first else "", False
+                w(f'\x1b_G{metadata}m={0 if eof else 1};'.encode('ascii'))
+                w(encoded)
+                w(b'\x1b\\')
 
 
 Save this script as :file:`send-png`, then you can use it to display any PNG
