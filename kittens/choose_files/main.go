@@ -20,6 +20,7 @@ import (
 	"github.com/kovidgoyal/kitty/tools/tui/loop"
 	"github.com/kovidgoyal/kitty/tools/tui/readline"
 	"github.com/kovidgoyal/kitty/tools/utils"
+	"github.com/kovidgoyal/kitty/tools/utils/shlex"
 	"golang.org/x/text/message"
 )
 
@@ -279,6 +280,35 @@ func load_config(opts *Options) (ans *Config, err error) {
 		return nil, err
 	}
 	ans.KeyboardShortcuts = config.ResolveShortcuts(ans.KeyboardShortcuts)
+	parts, err := shlex.Split(ans.Video_preview)
+	if err != nil {
+		return nil, err
+	}
+	for _, x := range parts {
+		k, v, found := strings.Cut(x, "=")
+		if !found {
+			return nil, fmt.Errorf("invalid value %s in video_preview", x)
+		}
+		var i uint64
+		switch k {
+		case "duration":
+			if video_duration, err = strconv.ParseFloat(v, 64); err != nil {
+				return nil, fmt.Errorf("invalid %s in video_preview: %s", k, v)
+			}
+		case "fps":
+			if i, err = strconv.ParseUint(v, 10, 0); err != nil {
+				return nil, fmt.Errorf("invalid %s in video_preview: %s", k, v)
+			}
+			video_fps = int(i)
+		case "width":
+			if i, err = strconv.ParseUint(v, 10, 0); err != nil {
+				return nil, fmt.Errorf("invalid %s in video_preview: %s", k, v)
+			}
+			video_width = int(i)
+		default:
+			return nil, fmt.Errorf("unrecognized key in video_preview: %s", k)
+		}
+	}
 	return ans, nil
 }
 
@@ -315,6 +345,7 @@ func (h *Handler) OnInitialize() (ans string, err error) {
 	err = h.graphics_handler.Initialize(h.lp)
 	h.result_manager.set_root_dir()
 	h.draw_screen()
+	h.lp.SendOverlayReady()
 	return
 }
 
@@ -747,6 +778,15 @@ var default_cwd string
 var use_light_colors bool
 
 func main(_ *cli.Command, opts *Options, args []string) (rc int, err error) {
+	if opts.ClearCache {
+		c, err := preview_cache()
+		if err != nil {
+			return 1, err
+		}
+		if err = c.Clear(); err != nil {
+			return 1, err
+		}
+	}
 	write_output := func(selections []string, interrupted bool, current_filter string) {
 		payload := make(map[string]any)
 		if err != nil {
@@ -771,18 +811,22 @@ func main(_ *cli.Command, opts *Options, args []string) (rc int, err error) {
 			}
 			return
 		}
-		m := strings.Join(selections, "\n")
-		fmt.Print(m)
-		if opts.WriteOutputTo != "" {
+		payload["paths"] = selections
+		if current_filter != "" {
+			payload["current_filter"] = current_filter
+		}
+		if tui.RunningAsUI() {
+			fmt.Println(tui.KittenOutputSerializer()(payload))
+		} else {
+			m := strings.Join(selections, "\n")
 			if opts.OutputFormat == "json" {
-				payload["paths"] = selections
-				if current_filter != "" {
-					payload["current_filter"] = current_filter
-				}
 				b, _ := json.MarshalIndent(payload, "", "  ")
 				m = string(b)
 			}
-			os.WriteFile(opts.WriteOutputTo, []byte(m), 0600)
+			fmt.Print(m)
+			if opts.WriteOutputTo != "" {
+				os.WriteFile(opts.WriteOutputTo, []byte(m), 0600)
+			}
 		}
 	}
 
@@ -798,6 +842,7 @@ func main(_ *cli.Command, opts *Options, args []string) (rc int, err error) {
 	lp.ColorSchemeChangeNotifications()
 	handler := Handler{lp: lp, err_chan: make(chan error, 8), msg_printer: message.NewPrinter(utils.LanguageTag()), spinner: tui.NewSpinner("dots")}
 	defer handler.graphics_handler.Cleanup()
+	defer calibre_cleanup()
 	handler.rl = readline.New(lp, readline.RlInit{
 		Prompt: "> ", ContinuationPrompt: ". ", Completer: FilePromptCompleter(handler.state.CurrentDir),
 	})

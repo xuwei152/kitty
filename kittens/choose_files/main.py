@@ -2,10 +2,14 @@
 # License: GPLv3 Copyright: 2025, Kovid Goyal <kovid at kovidgoyal.net>
 
 import sys
+from typing import Any
 
 from kitty.conf.types import Definition
 from kitty.constants import appname
 from kitty.simple_cli_definitions import CONFIG_HELP, CompletionSpec
+from kitty.typing_compat import BossType
+
+from ..tui.handler import result_handler
 
 definition = Definition(
     '!kittens.choose_files',
@@ -73,6 +77,15 @@ File extension aliases for syntax highlight. For example, to syntax highlight
 Multiple aliases must be separated by spaces.
 ''')
 
+opt('video_preview', 'width=480 fps=10 duration=5', long_text='''
+Control how videos are sampled for previwing. The width controls
+the size of the generated thumbnail from the video. Duration controls
+how long the generated thumbnail plays for, in seconds. Note that when
+changing these you should also use the :code:`--clear-cache` flag
+otherwise it will not affect already cached previews.
+''')
+
+
 egr()  # }}}
 
 agr('shortcuts', 'Keyboard shortcuts')  # {{{
@@ -122,6 +135,32 @@ egr()  # }}}
 
 def main(args: list[str]) -> None:
     raise SystemExit('This must be run as kitten choose-files')
+
+def relative_path_if_possible(path: str, base: str) -> str:
+    if not base or not path:
+        return path
+    from contextlib import suppress
+    from pathlib import Path
+    b = Path(base)
+    q = Path(path)
+    with suppress(ValueError):
+        return str(q.relative_to(b))
+    return path
+
+
+@result_handler(has_ready_notification=True)
+def handle_result(args: list[str], data: dict[str, Any], target_window_id: int, boss: BossType) -> None:
+    paths: list[str] = data.get('paths', [])
+    if not paths:
+        boss.ring_bell_if_allowed()
+        return
+    path = paths[0]
+    w = boss.window_id_map.get(target_window_id)
+    if w is not None:
+        cwd = w.cwd_of_child
+        if cwd:
+            path = relative_path_if_possible(path, cwd)
+        w.paste_text(path)
 
 
 usage = '[directory to start choosing files in]'
@@ -187,6 +226,11 @@ The format in which to write the output.
 
 --write-pid-to
 Path to a file to which to write the process ID (PID) of this process to.
+
+
+--clear-cache
+type=bool-set
+Clear the caches used by this kitten.
 '''.format(config_help=CONFIG_HELP.format(conf_name='choose-files', appname=appname)).format
 
 
