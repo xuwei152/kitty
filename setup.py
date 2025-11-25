@@ -1479,7 +1479,7 @@ def compile_python(base_path: str) -> None:
 
     exclude = re.compile('.*/shell-integration/ssh/bootstrap.py')
     compileall.compile_dir(
-        base_path, rx=exclude, force=True, optimize=(0, 1, 2), quiet=1, workers=0,  # type: ignore
+        base_path, rx=exclude, force=True, optimize=(0, 1, 2), quiet=1, workers=1,  # type: ignore
         invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH, ddir='')
 
 
